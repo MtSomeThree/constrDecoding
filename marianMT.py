@@ -99,7 +99,8 @@ class ConstrainedMT(MarianMTModel):
         constr_logits = self.model_rc_linear(rc_decoder_outputs[0])
         final_logits = mt_logits * self.temperature + self.log_sigmoid_fct(constr_logits) * self.constraint_factor
 
-        loss = None
+        loss1 = 0.0
+        loss2 = 0.0
 
         length = decoder_input_ids.shape[1]
 
@@ -116,10 +117,16 @@ class ConstrainedMT(MarianMTModel):
                     loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i + 1].unsqueeze(1))
 
                 cur_loss = loss_fct(pred_logits, rc_labels)
-                if loss is not None:
-                    loss += cur_loss
-                else:
-                    loss = cur_loss
+                loss1 += cur_loss
+
+            if self.regularization > 0.0:
+                for i in range(1, length):
+                    pred_logits = Sigmoid()(torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1)))
+                    sum_logits = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
+                    loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
+                    loss2 += self.regularization * loss_fct(pred_logits, sum_logits)
+                loss = loss1 + loss2
+        
 
         if fine_tune:
             loss_fct = CrossEntropyLoss()
@@ -129,12 +136,6 @@ class ConstrainedMT(MarianMTModel):
         # self property about Rc
         # \sum_(y_i) p_\theta(y_i|x, y_<i) * Rc(y_<=i) = Rc(y_<i)
 
-        if self.regularization > 0.0:
-            for i in range(1, length):
-                pred_logits = torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1))
-                sum_logits = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
-                loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
-                loss += self.regularization * loss_fct(pred_logits, sum_logits)
         
         return Seq2SeqLMOutput(
             loss=loss,

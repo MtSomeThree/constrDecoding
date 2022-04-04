@@ -407,7 +407,7 @@ if __name__ == "__main__":
 	parser.add_argument('--baseline_fine_tune', action='store_true')
 	parser.add_argument('--samples_file', type=str, default=None)
 	parser.add_argument('--temperature', type=float, default=1.0)
-	parser.add_argument('--regularization', type=float, default=5.0)
+	parser.add_argument('--regularization', type=float, default=0.5)
 	parser.add_argument('--test_mode', type=str, default='greedy')
 	parser.add_argument('--num_ref', type=int, default=2)
 	parser.add_argument('--keyword', type=str, default='10k')
