@@ -1,7 +1,7 @@
 from transformers import MarianMTModel, MarianTokenizer
 from transformers.models.marian.modeling_marian import MarianDecoder
 from transformers.modeling_outputs import Seq2SeqLMOutput
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, Sigmoid, LogSigmoid
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, Sigmoid, LogSigmoid, LogSoftmax
 from torch.nn.functional import softmax
 from datasets import load_dataset
 import torch
@@ -18,13 +18,18 @@ class ConstrainedMT(MarianMTModel):
         self.model_rc_linear = torch.nn.Linear(self.rc_config.d_model, self.model.shared.num_embeddings)
         self.constraint_factor = 0.0
         self.temperature = 1.0
+        self.regularization = 5.0
         self.log_sigmoid_fct = LogSigmoid()
+        self.log_softmax_fct = LogSoftmax(dim=-1)
 
     def set_constraint_factor(self, constraint_factor):
         self.constraint_factor = constraint_factor
 
     def set_temperature(self, temperature):
         self.temperature = temperature
+
+    def set_regularization(self, regularization):
+        self.regularization = regularization
 
     def forward(
         self,
@@ -90,15 +95,16 @@ class ConstrainedMT(MarianMTModel):
             return_dict=return_dict,
         )
 
-        mt_logits = outputs.logits
+        mt_logits = self.log_softmax_fct(outputs.logits)
         constr_logits = self.model_rc_linear(rc_decoder_outputs[0])
         final_logits = mt_logits * self.temperature + self.log_sigmoid_fct(constr_logits) * self.constraint_factor
 
         loss = None
 
+        length = decoder_input_ids.shape[1]
+
         if rc_labels is not None:
 
-            length = decoder_input_ids.shape[1]
             for i in range(length - 1):
                 pred_logits = torch.gather(constr_logits[:, i, :], 1, decoder_input_ids[:, i + 1].unsqueeze(1))
 
@@ -117,9 +123,18 @@ class ConstrainedMT(MarianMTModel):
 
         if fine_tune:
             loss_fct = CrossEntropyLoss()
-            loss = loss_fct(final_logits[:, :-1, :].reshape(-1, self.config.vocab_size), 
+            loss = float(length) * loss_fct(final_logits[:, :-1, :].reshape(-1, self.config.vocab_size), 
                 decoder_input_ids[:, 1:].reshape(-1))
 
+        # self property about Rc
+        # \sum_(y_i) p_\theta(y_i|x, y_<i) * Rc(y_<=i) = Rc(y_<i)
+
+        if self.regularization > 0.0:
+            for i in range(1, length):
+                pred_logits = torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1))
+                sum_logits = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
+                loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
+                loss += self.regularization * loss_fct(pred_logits, sum_logits)
         
         return Seq2SeqLMOutput(
             loss=loss,

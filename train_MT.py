@@ -407,6 +407,7 @@ if __name__ == "__main__":
 	parser.add_argument('--baseline_fine_tune', action='store_true')
 	parser.add_argument('--samples_file', type=str, default=None)
 	parser.add_argument('--temperature', type=float, default=1.0)
+	parser.add_argument('--regularization', type=float, default=5.0)
 	parser.add_argument('--test_mode', type=str, default='greedy')
 	parser.add_argument('--num_ref', type=int, default=2)
 	parser.add_argument('--keyword', type=str, default='10k')
@@ -441,7 +442,7 @@ if __name__ == "__main__":
 			args.sample_batch_size, args.batch_size, args.temperature)
 
 	if args.save_dir is None:
-		args.save_dir = './dump/MT/%s_%d-%d-%d-%.2f.ckpt'%(args.keyword,
+		args.save_dir = './dump/reg_MT/%s_%d-%d-%d-%.2f.ckpt'%(args.keyword,
 			args.sample_batch_size, args.batch_size, args.rc_layers, args.temperature)
 		if args.warm_start:
 			args.save_dir = './dump/MT/%s_%d-%d-%d-%.2f-warm.ckpt'%(args.keyword,
@@ -450,6 +451,7 @@ if __name__ == "__main__":
 	model_name = "Helsinki-NLP/opus-mt-es-en"
 	tokenizer = MarianTokenizer.from_pretrained(model_name)
 	model = ConstrainedMT.from_pretrained(model_name, rc_layers=args.rc_layers)
+	model.set_regularization(args.regularization)
 
 	# dataset = datasets.load_dataset("wmt14", "de-en")
 	# valid = dataset['validation']['translation']
@@ -506,7 +508,7 @@ if __name__ == "__main__":
 
 	else:
 
-		satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
+		#satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
 		constraint_function.set_device(args.device)
 		train_data = sample_from_marianMT(model, tokenizer, train_es, constraint_function, args)
 		model.set_constraint_factor(1.0)
