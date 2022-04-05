@@ -104,6 +104,8 @@ class ConstrainedMT(MarianMTModel):
 
         length = decoder_input_ids.shape[1]
 
+        loss = None
+
         if rc_labels is not None:
 
             for i in range(length - 1):
