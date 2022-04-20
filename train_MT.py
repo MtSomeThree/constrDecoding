@@ -413,6 +413,7 @@ if __name__ == "__main__":
 	parser.add_argument('--keyword', type=str, default='10k')
 	parser.add_argument('--rc_layers', type=int, default=3)
 	parser.add_argument('--warm_start', action='store_true')
+	parser.add_argument('--zero_init', action='store_true')
 	parser.add_argument('--log', type=str, default=None)
 	parser.add_argument('--save_dir', type=str, default=None)
 
@@ -452,6 +453,8 @@ if __name__ == "__main__":
 	tokenizer = MarianTokenizer.from_pretrained(model_name)
 	model = ConstrainedMT.from_pretrained(model_name, rc_layers=args.rc_layers)
 	model.set_regularization(args.regularization)
+	if args.zero_init:
+		model.zero_init_rc()
 
 	# dataset = datasets.load_dataset("wmt14", "de-en")
 	# valid = dataset['validation']['translation']
@@ -489,14 +492,14 @@ if __name__ == "__main__":
 			for line in f:
 				#clean_line = line.strip().split()[1:]
 				#clean_line = " ".join(clean_line)
-				valid_en[i].append(line)
+				valid_en[i].append(line.strip())
 
 	for i in range(num_reference):
 		with open('fluent-fisher/noids/test.noid.cleaned_%d'%(i), 'r') as f:
 			for line in f:
 				#clean_line = line.strip().split()[1:]
 				#clean_line = " ".join(clean_line)
-				test_en[i].append(line)
+				test_en[i].append(line.strip())
 
 	if args.load_dir is not None:
 		decoder_dict, linear_dict = torch.load(args.load_dir)
@@ -508,7 +511,7 @@ if __name__ == "__main__":
 
 	else:
 
-		#satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
+		satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
 		constraint_function.set_device(args.device)
 		train_data = sample_from_marianMT(model, tokenizer, train_es, constraint_function, args)
 		model.set_constraint_factor(1.0)

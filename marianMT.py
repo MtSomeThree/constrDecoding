@@ -31,6 +31,10 @@ class ConstrainedMT(MarianMTModel):
     def set_regularization(self, regularization):
         self.regularization = regularization
 
+    def zero_init_rc(self):
+        torch.nn.init.zeros_(self.model_rc_linear.weight)
+        torch.nn.init.zeros_(self.model_rc_linear.bias)
+
     def forward(
         self,
         input_ids=None,
@@ -121,12 +125,28 @@ class ConstrainedMT(MarianMTModel):
                 cur_loss = loss_fct(pred_logits, rc_labels)
                 loss1 += cur_loss
 
+            loss = loss1
+
             if self.regularization > 0.0:
                 for i in range(1, length):
                     pred_logits = Sigmoid()(torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1)))
                     sum_logits = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
-                    loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
-                    loss2 += self.regularization * loss_fct(pred_logits, sum_logits)
+                    ### wrong version
+                    #loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
+                    #loss2 += self.regularization * loss_fct(pred_logits, sum_logits)
+
+                    ### version 1 (p1-p2)^2
+                    loss_fct = MSELoss(reduction='none')
+                    if float(decoder_attention_mask[:, i].sum()) == 0:
+                        continue
+                    factor = self.regularization / float(decoder_attention_mask[:, i].sum())
+                    #loss2 += factor * (loss_fct(torch.exp(pred_logits), torch.exp(sum_logits)) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
+
+                    ### version 2 (p1/p2 - 1)^2
+                    ref = torch.ones(pred_logits.shape).to(self.device)
+                    loss2 += factor * (loss_fct(torch.exp(sum_logits - pred_logits), ref) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
+
+
                 loss = loss1 + loss2
         
 
