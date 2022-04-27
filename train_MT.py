@@ -416,6 +416,7 @@ if __name__ == "__main__":
 	parser.add_argument('--zero_init', action='store_true')
 	parser.add_argument('--log', type=str, default=None)
 	parser.add_argument('--save_dir', type=str, default=None)
+	parser.add_argument('--reg_type', type=int, default=3)
 
 	args = parser.parse_args()
 
@@ -453,6 +454,7 @@ if __name__ == "__main__":
 	tokenizer = MarianTokenizer.from_pretrained(model_name)
 	model = ConstrainedMT.from_pretrained(model_name, rc_layers=args.rc_layers)
 	model.set_regularization(args.regularization)
+	model.set_reg_type(args.reg_type)
 	if args.zero_init:
 		model.zero_init_rc()
 
