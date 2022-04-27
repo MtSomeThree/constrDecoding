@@ -1,7 +1,7 @@
 from transformers import MarianMTModel, MarianTokenizer
 from transformers.models.marian.modeling_marian import MarianDecoder
 from transformers.modeling_outputs import Seq2SeqLMOutput
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, BCELoss, Sigmoid, LogSigmoid, LogSoftmax
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, BCELoss, KLDivLoss, Sigmoid, LogSigmoid, LogSoftmax
 from torch.nn.functional import softmax
 from datasets import load_dataset
 import torch
@@ -142,9 +142,11 @@ class ConstrainedMT(MarianMTModel):
 
             if self.regularization > 0.0:
                 for i in range(1, length):
-                    pred_probs = Sigmoid()(torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1)))
-                    sum_logits = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
+                    pred_logits = torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1))
+                    pred_probs = torch.sigmoid(pred_logits)
+                    sum_log = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
                     sum_probs = torch.exp(sum_logits)
+                    sum_logits = torch.log(sum_probs / (1 - sum_probs))
                     ### wrong version
                     #loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
                     #loss2 += self.regularization * loss_fct(pred_logits, sum_logits)
@@ -155,7 +157,7 @@ class ConstrainedMT(MarianMTModel):
                         if float(decoder_attention_mask[:, i].sum()) == 0:
                             continue
                         factor = self.regularization / float(decoder_attention_mask[:, i].sum())
-                        loss2 += factor * (loss_fct(pred_logits, sum_logits) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
+                        loss2 += factor * (loss_fct(pred_probs, sum_probs) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
 
                     ### version 2 (p1/p2 - 1)^2
                     elif self.reg_type == 2:
@@ -164,14 +166,14 @@ class ConstrainedMT(MarianMTModel):
                             continue
                         ref = torch.ones(pred_probs.shape).to(self.device)
                         factor = self.regularization / float(decoder_attention_mask[:, i].sum())
-                        loss2 += factor * (loss_fct(sum_logits / pred_logits, ref) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
+                        loss2 += factor * (loss_fct(sum_probs / pred_probs, ref) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
                     
                     ### version 3 (KL(p1||p2))
                     elif self.reg_type == 3:
-                        #loss_fct = BCELoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
-                        loss2 += self.regularization * (self.my_BCELoss(sum_probs, pred_probs, mask=decoder_attention_mask[:, i].unsqueeze(1)) 
-                                            - self.my_BCELoss(pred_probs, pred_probs, mask=decoder_attention_mask[:, i].unsqueeze(1)))
-
+                        loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
+                        loss2 += self.regularization * (loss_fct(sum_logits, pred_probs) - loss_fct(pred_logits, pred_probs))
+                                        
+                print (loss1.item(), loss2.item())
 
                 loss = loss1 + loss2
         
