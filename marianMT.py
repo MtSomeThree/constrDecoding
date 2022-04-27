@@ -1,7 +1,7 @@
 from transformers import MarianMTModel, MarianTokenizer
 from transformers.models.marian.modeling_marian import MarianDecoder
 from transformers.modeling_outputs import Seq2SeqLMOutput
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, Sigmoid, LogSigmoid, LogSoftmax
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, BCELoss, Sigmoid, LogSigmoid, LogSoftmax
 from torch.nn.functional import softmax
 from datasets import load_dataset
 import torch
@@ -38,6 +38,15 @@ class ConstrainedMT(MarianMTModel):
     def zero_init_rc(self):
         torch.nn.init.zeros_(self.model_rc_linear.weight)
         torch.nn.init.zeros_(self.model_rc_linear.bias)
+
+    def my_BCELoss(self, x, y, mask=None):
+        result = -(y * torch.log(x) + (1 - y) * torch.log(1 - x))
+        if mask == None:
+            return result.mean()
+        else:
+            factor = 1.0 / mask.sum()
+            return (result * mask * factor).sum()
+        #return -(y * torch.log(x) + (1 - y) * torch.log(1 - x))
 
     def forward(
         self,
@@ -151,14 +160,17 @@ class ConstrainedMT(MarianMTModel):
                     ### version 2 (p1/p2 - 1)^2
                     elif self.reg_type == 2:
                         loss_fct = MSELoss(reduction='none')
+                        if float(decoder_attention_mask[:, i].sum()) == 0:
+                            continue
                         ref = torch.ones(pred_probs.shape).to(self.device)
                         factor = self.regularization / float(decoder_attention_mask[:, i].sum())
                         loss2 += factor * (loss_fct(sum_logits / pred_logits, ref) * decoder_attention_mask[:, i].unsqueeze(1)).sum()
                     
                     ### version 3 (KL(p1||p2))
                     elif self.reg_type == 3:
-                        loss_fct = BCELoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
-                        loss2 += self.regularization * (loss_fct(sum_probs, pred_probs) - loss_fct(pred_probs, pred_probs))
+                        #loss_fct = BCELoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
+                        loss2 += self.regularization * (self.my_BCELoss(sum_probs, pred_probs, mask=decoder_attention_mask[:, i].unsqueeze(1)) 
+                                            - self.my_BCELoss(pred_probs, pred_probs, mask=decoder_attention_mask[:, i].unsqueeze(1)))
 
 
                 loss = loss1 + loss2
