@@ -581,9 +581,9 @@ if __name__ == "__main__":
 
 	else:
 
-		#satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
 		constraint_function.set_device(args.device)
 		train_data = sample_from_marianMT(model, tokenizer, train_es, constraint_function, args)
 		model.set_constraint_factor(1.0)
-		train_rc(model, train_data, test_es, constraint_function, args, valid_ref=test_en)
+		train_rc(model, train_data, valid_es, constraint_function, args, valid_ref=valid_en)
+		satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
 
