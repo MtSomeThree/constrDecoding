@@ -357,7 +357,42 @@ def test_rc(model, tokenizer, constraint_function, source_texts, args, use_const
 		return satisfied, score.score, translated
 	return satisfied
 
-def fine_tune_GPT2_with_pos_samples(model, samples_list, labels_list, masks_list, logprobs_list, args):
+# def fine_tune_GPT2_with_pos_samples(model, samples_list, labels_list, masks_list, logprobs_list, args):
+# 	model.set_constraint_factor(0.0)
+
+# 	fine_tune_parameters = []
+# 	for n, p in model.named_parameters():
+# 		if "model_rc" in n:
+# 			p.requires_grad = False
+# 		else:
+# 			fine_tune_parameters.append(p)
+
+# 	optimizer = Adam(params=fine_tune_parameters, lr=args.lr)
+
+
+# 	for epoch in range(args.num_epochs):
+# 		cnt = 1
+# 		loss_list = []
+# 		for samples, labels, masks, logprobs in tqdm(zip(samples_list, labels_list, masks_list, logprobs_list)):
+# 			labels = labels.float()
+# 			if labels.sum() < 0.5:
+# 				continue
+# 			outputs = model(input_ids=samples, attention_mask=masks, labels=samples, rc_weights=logprobs, rc_labels=labels.squeeze(1))
+# 			loss = outputs.loss
+
+# 			optimizer.zero_grad()
+# 			loss.backward()
+# 			optimizer.step()
+
+# 			cnt += 1
+# 			loss_list.append(loss.item())
+
+# 		print ("Epoch %d: avg loss: %.4f"%(epoch, torch.Tensor(loss_list).mean()))
+
+# 		satisfied, _ = test_rc(model, tokenizer, args, use_constr=True, sample_text=(epoch == args.num_epochs - 1))
+# 		print (float(satisfied) / float(args.num_test) / float(args.sample_batch_size))
+
+def fine_tune_epoch(model, tokenizer, input_list, ref_list):
 	model.set_constraint_factor(0.0)
 
 	fine_tune_parameters = []
@@ -369,28 +404,45 @@ def fine_tune_GPT2_with_pos_samples(model, samples_list, labels_list, masks_list
 
 	optimizer = Adam(params=fine_tune_parameters, lr=args.lr)
 
+	length = int(len(input_list) / args.batch_size)
 
-	for epoch in range(args.num_epochs):
-		cnt = 1
-		loss_list = []
-		for samples, labels, masks, logprobs in tqdm(zip(samples_list, labels_list, masks_list, logprobs_list)):
-			labels = labels.float()
-			if labels.sum() < 0.5:
-				continue
-			outputs = model(input_ids=samples, attention_mask=masks, labels=samples, rc_weights=logprobs, rc_labels=labels.squeeze(1))
-			loss = outputs.loss
+	loss_list = []
 
-			optimizer.zero_grad()
-			loss.backward()
-			optimizer.step()
+	for idx in tqdm(range(length)):
+		texts = input_list[idx * args.batch_size: (idx + 1) * args.batch_size]
+		refs = ref_list[idx * args.batch_size: (idx + 1) * args.batch_size]
 
-			cnt += 1
-			loss_list.append(loss.item())
+		encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=128)
+		input_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
+		attention_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
-		print ("Epoch %d: avg loss: %.4f"%(epoch, torch.Tensor(loss_list).mean()))
+		encodings_dict = tokenizer(refs, return_tensors="pt", padding=True, truncation=True, max_length=128)
+		decoder_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
+		decoder_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
-		satisfied, _ = test_rc(model, tokenizer, args, use_constr=True, sample_text=(epoch == args.num_epochs - 1))
-		print (float(satisfied) / float(args.num_test) / float(args.sample_batch_size))
+		padding = torch.zeros(args.batch_size).long().unsqueeze(1).to(args.device) + tokenizer.pad_token_id
+		decoder_ids = torch.cat((padding, decoder_ids), 1)
+		mask_padding = torch.ones(args.batch_size).long().unsqueeze(1).to(args.device)
+		decoder_mask = torch.cat((mask_padding, decoder_mask), 1)
+
+		outputs = model(
+					input_ids=input_ids, 
+					attention_mask=attention_mask, 
+					decoder_input_ids=decoder_ids,
+					decoder_attention_mask=decoder_mask,
+					rc_weights=None, 
+					rc_labels=None,
+					fine_tune=True
+				)
+		loss = outputs.loss
+
+		optimizer.zero_grad()
+		loss.backward()
+		optimizer.step()
+
+		loss_list.append(loss.item())
+
+	print ("avg loss: %.4f"%(torch.Tensor(loss_list).mean()))
 
 
 if __name__ == "__main__":
@@ -414,6 +466,7 @@ if __name__ == "__main__":
 	parser.add_argument('--rc_layers', type=int, default=3)
 	parser.add_argument('--warm_start', action='store_true')
 	parser.add_argument('--zero_init', action='store_true')
+	parser.add_argument('--fine_tune', action='store_true')
 	parser.add_argument('--log', type=str, default=None)
 	parser.add_argument('--save_dir', type=str, default=None)
 	parser.add_argument('--reg_type', type=int, default=3)
@@ -442,6 +495,9 @@ if __name__ == "__main__":
 	if args.log is None:
 		args.log = './dump/MT/fisher_%s_%d-%d-%.2f.log'%(args.keyword, 
 			args.sample_batch_size, args.batch_size, args.temperature)
+
+	if args.fine_tune:
+		args.keyword = 'finetune'
 
 	if args.save_dir is None:
 		args.save_dir = './dump/reg_MT/%s_%d-%d-%d-%.2f.ckpt'%(args.keyword,
@@ -473,6 +529,7 @@ if __name__ == "__main__":
 	valid_es = []
 	train_es = []
 	test_es = []
+	train_en = []
 	valid_en = [[]] * num_reference
 	test_en = [[]] * num_reference
 
@@ -488,6 +545,9 @@ if __name__ == "__main__":
 		for line in f:
 			valid_es.append(line.strip())
 
+	with open('fisher-callhome-corpus/corpus/ldc/fisher_train.en', 'r') as f:
+		for line in f:
+			train_en.append(line.strip())
 
 	for i in range(num_reference):
 		with open('fluent-fisher/noids/dev.noid.cleaned_%d'%(i), 'r') as f:
@@ -502,6 +562,14 @@ if __name__ == "__main__":
 				#clean_line = line.strip().split()[1:]
 				#clean_line = " ".join(clean_line)
 				test_en[i].append(line.strip())
+
+	if args.fine_tune:
+		model.to(args.device)
+		for i in range(3):
+			fine_tune_epoch(model, tokenizer, train_es, train_en)
+			test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
+			finetune_dump_dir = './dump/reg_MT/pretrained-%d.ckpt'%(i)
+
 
 	if args.load_dir is not None:
 		decoder_dict, linear_dict = torch.load(args.load_dir)

@@ -145,7 +145,7 @@ class ConstrainedMT(MarianMTModel):
                     pred_logits = torch.gather(constr_logits[:, i - 1, :], 1, decoder_input_ids[:, i].unsqueeze(1))
                     pred_probs = torch.sigmoid(pred_logits)
                     sum_log = torch.logsumexp(final_logits[:, i, :], dim=-1).unsqueeze(1)
-                    sum_probs = torch.exp(sum_logits)
+                    sum_probs = torch.exp(sum_log)
                     sum_logits = torch.log(sum_probs / (1 - sum_probs))
                     ### wrong version
                     #loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
@@ -173,15 +173,17 @@ class ConstrainedMT(MarianMTModel):
                         loss_fct = BCEWithLogitsLoss(weight=decoder_attention_mask[:, i].unsqueeze(1))
                         loss2 += self.regularization * (loss_fct(sum_logits, pred_probs) - loss_fct(pred_logits, pred_probs))
                                         
-                print (loss1.item(), loss2.item())
+                #print (loss1.item(), loss2.item())
 
                 loss = loss1 + loss2
         
 
         if fine_tune:
-            loss_fct = CrossEntropyLoss()
-            loss = float(length) * loss_fct(final_logits[:, :-1, :].reshape(-1, self.config.vocab_size), 
+            loss_fct = CrossEntropyLoss(reduction='none')
+            loss = loss_fct(mt_logits[:, :-1, :].reshape(-1, self.config.vocab_size), 
                 decoder_input_ids[:, 1:].reshape(-1))
+            weights = decoder_attention_mask[:, 1:].reshape(-1)
+            loss = (loss * weights).mean()
 
         # self property about Rc
         # \sum_(y_i) p_\theta(y_i|x, y_<i) * Rc(y_<=i) = Rc(y_<i)
@@ -204,6 +206,12 @@ class ConstrainedMT(MarianMTModel):
         linear_dict = self.model_rc_linear.state_dict()
         print ("Saving Model to %s..."%(save_dir))
         torch.save((decoder_dict, linear_dict), save_dir)
+
+    def save_all(self, save_dir):
+        save_dict = self.state_dict()
+        print ("Saving Model to %s..."%(save_dir))
+        torch.save(save_dict, save_dir)
+
 
     @staticmethod
     def _reorder_cache(past, beam_idx):
