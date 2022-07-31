@@ -273,7 +273,7 @@ def train_rc(model, train_data, valid_texts, constraint_function, args, valid_re
 
 		print ("Epoch %d: avg loss: %.4f"%(epoch, torch.Tensor(loss_list).mean()))
 
-		satisfied, bleu_score, translated = test_rc(model, tokenizer, constraint_function, valid_texts, args, use_constr=True, sample_text=(epoch == args.num_epochs - 1), references=valid_ref)
+		satisfied, bleu_score, translated = test_rc(model, tokenizer, constraint_function, valid_texts, args, use_constr=(args.num_epochs != 1), sample_text=(epoch == args.num_epochs - 1), references=valid_ref)
 		if bleu_score > max_score:
 			max_score = bleu_score
 			best_translated = translated
@@ -282,7 +282,7 @@ def train_rc(model, train_data, valid_texts, constraint_function, args, valid_re
 
 	with open(args.log, 'w') as f:
 		for line in best_translated:
-			f.write("%s\n"%(line))
+			f.write("%d %s\n"%(constraint_function(line), line))
 
 def test_rc(model, tokenizer, constraint_function, source_texts, args, use_constr=True, sample_text=False, references=None):
 	if use_constr:
@@ -583,7 +583,7 @@ if __name__ == "__main__":
 
 		constraint_function.set_device(args.device)
 		train_data = sample_from_marianMT(model, tokenizer, train_es, constraint_function, args)
-		model.set_constraint_factor(1.0)
-		train_rc(model, train_data, valid_es, constraint_function, args, valid_ref=valid_en)
+		model.set_constraint_factor(0.0)
+		train_rc(model, train_data, test_es, constraint_function, args, valid_ref=test_en)
 		satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
 
