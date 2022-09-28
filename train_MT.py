@@ -587,7 +587,7 @@ if __name__ == "__main__":
         satisfied, _, translated = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=True, sample_text=False, references=test_en)
         with open(args.log, "w") as f:
             for line in translated:
-                f.write("%d %s\n"%(constraint_function(line), line))
+                f.write("%s\n"%(line))
         print ("Output base done!")
         train_rc(model, train_data, test_es, constraint_function, args, valid_ref=test_en)
         satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
