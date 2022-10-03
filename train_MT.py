@@ -1,7 +1,7 @@
 from torch.optim import AdamW, Adam
 from torch.nn.functional import log_softmax, softmax
 from transformers import MarianMTModel, MarianTokenizer
-from marianMT import ConstrainedMT
+from marianMT import ConstrainedMT, ConstrainedIndMT
 from neural_constr import NeuralConstraintFunction
 from nltk.tokenize import word_tokenize
 from nltk.translate.bleu_score import sentence_bleu
@@ -39,15 +39,18 @@ def sample_from_marianMT(model, tokenizer, source_texts, constraint_function, ar
 
     cur_max_length = 1
 
-    length = len(source_texts)
+    source_length = len(source_texts)
 
-    for idx in tqdm(range(length)):
-        source_text = source_texts[idx]
+    epoch = int(args.sample_batch_size / 8)
+    args.sample_batch_size = 8
+
+    for idx in tqdm(range(source_length * epoch)):
+        source_text = source_texts[idx % source_length]
         cnt += 1
 
-        texts = [source_text] * args.sample_batch_size
+        texts = [source_text] * 8
 
-        encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=128)
+        encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=args.max_length)
         input_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
         attention_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
@@ -57,6 +60,7 @@ def sample_from_marianMT(model, tokenizer, source_texts, constraint_function, ar
             do_sample=True, 
             output_scores=True, 
             return_dict_in_generate=True,
+            max_length=args.max_length,
         )
         output_ids = outputs.sequences.to('cpu')
 
@@ -133,7 +137,7 @@ def sample_from_marianMT2(model, tokenizer, source_texts, constraint_function, a
             cnt += 1
 
             texts = source_text
-            encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=128)
+            encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=args.max_length)
             input_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
             attention_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
@@ -195,7 +199,7 @@ def train_rc(model, train_data, valid_texts, constraint_function, args, valid_re
         p.requires_grad = False
     rc_parameters = []
     for n, p in model.named_parameters():
-        if "model_rc" in n:
+        if "rc_" in n:
             p.requires_grad = True
             rc_parameters.append(p)
 
@@ -319,7 +323,7 @@ def test_rc(model, tokenizer, constraint_function, source_texts, args, use_const
             num_per_text = 1
             texts = source_texts[idx * test_batch_size: min(length, (idx + 1) *  test_batch_size)]
 
-        encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=128)
+        encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=args.max_length)
         input_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
         attention_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
@@ -327,6 +331,8 @@ def test_rc(model, tokenizer, constraint_function, source_texts, args, use_const
             input_ids=input_ids, 
             attention_mask=attention_mask, 
             do_sample=(args.test_mode == 'sample'), 
+            repetition_penalty=5.0,
+            max_length=args.max_length,
         )
 
         for output in outputs:
@@ -412,11 +418,11 @@ def fine_tune_epoch(model, tokenizer, input_list, ref_list):
         texts = input_list[idx * args.batch_size: (idx + 1) * args.batch_size]
         refs = ref_list[idx * args.batch_size: (idx + 1) * args.batch_size]
 
-        encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=128)
+        encodings_dict = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=args.max_length)
         input_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
         attention_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
-        encodings_dict = tokenizer(refs, return_tensors="pt", padding=True, truncation=True, max_length=128)
+        encodings_dict = tokenizer(refs, return_tensors="pt", padding=True, truncation=True, max_length=args.max_length)
         decoder_ids = torch.tensor(encodings_dict['input_ids']).to(args.device)
         decoder_mask = torch.tensor(encodings_dict['attention_mask']).to(args.device)
 
@@ -452,7 +458,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=0.00003)
     parser.add_argument('--cuda', type=int, default=-1)
-    parser.add_argument('--max_length', type=int, default=30)
+    parser.add_argument('--max_length', type=int, default=64)
     parser.add_argument('--device', type=str, default=None)
     parser.add_argument('--dump_dir', type=str, default=None)
     parser.add_argument('--load_dir', type=str, default=None)
@@ -508,7 +514,9 @@ if __name__ == "__main__":
 
     model_name = "Helsinki-NLP/opus-mt-es-en"
     tokenizer = MarianTokenizer.from_pretrained(model_name)
-    model = ConstrainedMT.from_pretrained(model_name, rc_layers=args.rc_layers)
+    #model = ConstrainedMT.from_pretrained(model_name, rc_layers=args.rc_layers)
+    model = ConstrainedIndMT.from_pretrained(model_name)
+    model.rc_init(model_name)
     model.set_regularization(args.regularization)
     model.set_reg_type(args.reg_type)
     if args.zero_init:
@@ -582,13 +590,15 @@ if __name__ == "__main__":
     else:
 
         constraint_function.set_device(args.device)
-        train_data = sample_from_marianMT(model, tokenizer, train_es, constraint_function, args)
+        train_data = sample_from_marianMT(model, tokenizer, train_es[:10000], constraint_function, args)
         model.set_constraint_factor(0.0)
+        '''
         satisfied, _, translated = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=True, sample_text=False, references=test_en)
         with open(args.log, "w") as f:
             for line in translated:
                 f.write("%s\n"%(line))
         print ("Output base done!")
-        train_rc(model, train_data, test_es, constraint_function, args, valid_ref=test_en)
+        '''
+        train_rc(model, traintrain_data, test_es, constraint_function, args, valid_ref=test_en)
         satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
 
