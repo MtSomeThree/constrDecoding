@@ -209,7 +209,7 @@ def train_rc(model, train_data, valid_texts, constraint_function, args, valid_re
     optimizer = AdamW(params=rc_parameters, lr=args.lr)
     train_length = len(inputs_list)
 
-    max_score = -1
+    max_satisfied = -1
 
     if args.warm_start:
         print ("Start Warm Start:")
@@ -278,8 +278,8 @@ def train_rc(model, train_data, valid_texts, constraint_function, args, valid_re
         print ("Epoch %d: avg loss: %.4f"%(epoch, torch.Tensor(loss_list).mean()))
 
         satisfied, bleu_score, translated = test_rc(model, tokenizer, constraint_function, valid_texts, args, use_constr=(args.num_epochs != 1), sample_text=(epoch == args.num_epochs - 1), references=valid_ref)
-        if bleu_score > max_score:
-            max_score = bleu_score
+        if satisfied > max_satisfied:
+            max_satisfied = satisfied
             best_translated = translated
             model.save_rc(args.save_dir)
 
@@ -331,7 +331,7 @@ def test_rc(model, tokenizer, constraint_function, source_texts, args, use_const
             input_ids=input_ids, 
             attention_mask=attention_mask, 
             do_sample=(args.test_mode == 'sample'), 
-            repetition_penalty=5.0,
+            repetition_penalty=args.repetition,
             max_length=args.max_length,
         )
 
@@ -476,6 +476,7 @@ if __name__ == "__main__":
     parser.add_argument('--log', type=str, default=None)
     parser.add_argument('--save_dir', type=str, default=None)
     parser.add_argument('--reg_type', type=int, default=3)
+    parser.add_argument('--repetition', type=float, default=5.0)
 
     args = parser.parse_args()
 
@@ -599,6 +600,6 @@ if __name__ == "__main__":
                 f.write("%s\n"%(line))
         print ("Output base done!")
         '''
-        train_rc(model, traintrain_data, test_es, constraint_function, args, valid_ref=test_en)
-        satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=False, sample_text=True, references=test_en)
+        train_rc(model, train_data, valid_es, constraint_function, args, valid_ref=valid_en)
+        satisfied, _, _ = test_rc(model, tokenizer, constraint_function, test_es, args, use_constr=True, sample_text=True, references=test_en)
 
