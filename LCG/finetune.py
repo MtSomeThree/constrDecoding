@@ -76,8 +76,7 @@ def main():
     eval_mode = args.eval_mode
     batch_size = args.batch_size
     iter_per = args.iter_per
-    directory_identifier_raw = "basemodel_%s_%s" % (dataset_name, "nolex"
-    if (dataset_name[0:11] == "yelp_review" or dataset_name[0:4] == "news") else "wlex")
+    directory_identifier_raw = "basemodel_%s_%s" % (dataset_name, "wlex")
     directory_identifier = "baseline_randkey_%s" % dataset_name
     continue_training = args.continue_training
     if not os.path.exists("./checkpoints"):
