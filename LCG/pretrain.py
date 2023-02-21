@@ -83,33 +83,23 @@ def main():
 
     try:
         tokenizer, dataset, val_dataset = pickle.load(
-            open("checkpoints/baselinedataset-%s-%s.pyc" % (dataset_name, "wlex" if args.pseudo_seq2seq else "nolex"), "rb"))
+            open("checkpoints/baselinedataset-%s-%s.pyc" % (dataset_name, "wlex" ), "rb"))
         # raise NotImplementedError()
     except:
         tokenizer = GPT2Tokenizer.from_pretrained(ckpt_name)
         tokenizer.bos_token = "$"
         tokenizer.sep_token = "#"
-        if args.pseudo_seq2seq:
-            if dataset_name[0:11] == "yelp_review" or dataset_name[0:4] == "news":
-                dataset = RandomKeywordSequentialDataset(tokenizer=tokenizer, max_len=384, keyword_num=keyword_num)
-                dataset.add(dataset_name)
-            else:
-                import datasets
-                dataset_raw = datasets.load_dataset(dataset_name, split="train")
-                dataset = GivenKeywordSequentialDataset(tokenizer=tokenizer, max_len=384)
-                dataset.add(dataset_raw, field_keywords="concepts", field_sequence="target")
+        if dataset_name[0:11] == "yelp_review" or dataset_name[0:4] == "news":
+            dataset = RandomKeywordSequentialDataset(tokenizer=tokenizer, max_len=384, keyword_num=keyword_num)
+            dataset.add(dataset_name)
         else:
-            if dataset_name[0:11] == "yelp_review" or dataset_name[0:4] == "news":
-                dataset = DomainAdaptationSequentialDataset(tokenizer=tokenizer, max_len=384)
-                dataset.add(dataset_name)
-            elif dataset_name == "common_gen":
-                import datasets
-                dataset_raw = datasets.load_dataset(dataset_name, split="train")
-                dataset = DomainAdaptationSequentialDataset(tokenizer=tokenizer, max_len=384)
-                dataset.add_huggingface(dataset_raw, field_keywords="concepts", field_sequence="target")
+            import datasets
+            dataset_raw = datasets.load_dataset(dataset_name, split="train")
+            dataset = GivenKeywordSequentialDataset(tokenizer=tokenizer, max_len=384)
+            dataset.add(dataset_raw, field_keywords="concepts", field_sequence="target")
         val_dataset = None
         pickle.dump((tokenizer, dataset, val_dataset),
-                    open("checkpoints/baselinedataset-%s-%s.pyc" % (dataset_name, "wlex" if args.pseudo_seq2seq else "nolex"), "wb"))
+                    open("checkpoints/baselinedataset-%s-%s.pyc" % (dataset_name, "wlex"), "wb"))
 
     dataset.__getitem__(0)
     base_model = GPT2LMHeadModel.from_pretrained(ckpt_name)
