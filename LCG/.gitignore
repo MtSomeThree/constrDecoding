@@ -1,0 +1,5 @@
+.idea/
+*.txt
+*.json
+*.pyc
+.DS_Store
